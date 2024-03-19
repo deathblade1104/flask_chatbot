@@ -1,0 +1,32 @@
+# Ignore Python bytecode files
+*.pyc
+
+# Ignore Python cache directories
+__pycache__/
+
+# Ignore environment configuration files (if using virtual environments)
+.env
+
+# Ignore local development settings (if using settings files)
+instance/
+
+# Ignore editor and IDE files
+.vscode/
+.idea/
+*.swp
+
+# Ignore dependency directories
+venv/
+env/
+*.venv/
+ENV/
+
+# Ignore package tarballs, logs, and environment specifics
+*.log
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.pyo
+*.pyc
+__pycache__/
+*.so

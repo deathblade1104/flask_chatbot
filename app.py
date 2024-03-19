@@ -5,15 +5,22 @@ import sqlite3
 from DatabaseTables import DatabaseTables
 from PasswordHasher import PasswordHasher
 from openai import OpenAI
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
 DATABASE = 'database.db'
-
 password_hasher = PasswordHasher()
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["10 per minute"]
+)
 
 
 def is_logged_in():
@@ -71,7 +78,7 @@ def login():
             return jsonify({"message": "Incorrect password"}), 401
 
     session['user_id'] = user[0]
-    
+
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE chat_log SET is_active = 0 WHERE user_id = ?", (session.get('user_id'),))
@@ -91,7 +98,9 @@ def logout():
     session.pop('user_id', None)
     return jsonify({"message": "Logout successful"}), 200
 
+
 @app.route('/openai-completion', methods=['POST'])
+@limiter.limit("10 per minute")
 def chat():
     if not is_logged_in():
         return jsonify({"message": "Not Logged In"}), 401
@@ -103,38 +112,40 @@ def chat():
     if not prompt:
         return jsonify({"message": "Prompt field is required"}), 400
 
-    chat_logs = [];
-
-    with sqlite3.connect(DATABASE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM chat_log WHERE user_id = ? AND is_active = 1", (user_id,))
-        chat_logs = cursor.fetchall()
-
-    messages = [];
-
-    for chat_log in chat_logs:
-        currPrompt = chat_log[2];
-        cuurResponse = chat_log[3];
-        messages.append({"role" : "user", "content" : currPrompt});
-        messages.append({"role" : "assistant", "content" : cuurResponse});
-
-    print("Previous Messages: ",messages);
-
-    client = OpenAI(api_key= OPENAI_API_KEY);
-    messages.append({"role": "user", "content": prompt});
-
-    response = client.chat.completions.create(
-      model="gpt-3.5-turbo-0125",
-      messages = messages
-    )
-
-    responseMessage = response.choices[0].message.content;
-    print(responseMessage);
+    chat_logs = []
     with sqlite3.connect(DATABASE) as conn:
       cursor = conn.cursor()
-      cursor.execute("INSERT INTO chat_log (user_id, request, response, is_active) VALUES (?, ?, ?, ?)", (user_id, prompt, responseMessage.strip(), True))
+      cursor.execute("SELECT * FROM chat_log WHERE user_id = ? AND is_active = 1", (user_id,))
+      chat_logs = cursor.fetchall()
 
-    return jsonify({"message": responseMessage}), 200
+    messages = []
+    for chat_log in chat_logs:
+      currPrompt = chat_log[2]
+      cuurResponse = chat_log[3]
+      messages.append({"role": "user", "content": currPrompt})
+      messages.append({"role": "assistant", "content": cuurResponse})
+
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+
+        client = OpenAI(api_key= OPENAI_API_KEY);
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo-0125",
+            messages=messages
+        )
+
+        responseMessage = response.choices[0].message.content
+
+        with sqlite3.connect(DATABASE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO chat_log (user_id, request, response, is_active) VALUES (?, ?, ?, ?)", (user_id, prompt, responseMessage.strip(), True))
+
+        return jsonify({"message": responseMessage}), 200
+
+    except Exception as e:
+        return jsonify({"message": f"Error processing request: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
